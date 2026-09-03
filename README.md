@@ -1,5 +1,6 @@
 # Reportix
-An easier way to grab your computer specs in a PDF report.
+
+An effortless way to generate a clean, detailed PDF report of your computer's hardware and system specifications.
 
 > The app is only tested on Linux and Windows
 
