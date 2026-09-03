@@ -1,0 +1,6 @@
+psutil
+py-cpuinfo
+reportlab
+GPUtil
+wmi
+PyQt6
