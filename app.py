@@ -62,38 +62,108 @@ def get_motherboard_info():
         pass
     return board if board else "Standard Motherboard"
 
+def _read_linux_sysfs_vram():
+    """Map DRM card index -> human-readable VRAM size, when the kernel
+    driver exposes it (works for amdgpu/nouveau; NVIDIA's proprietary
+    driver usually does not expose this file)."""
+    vram_by_index = {}
+    drm_path = "/sys/class/drm"
+    try:
+        if os.path.isdir(drm_path):
+            for entry in sorted(os.listdir(drm_path)):
+                if not entry.startswith("card") or "-" in entry:
+                    continue
+                vram_file = os.path.join(drm_path, entry, "device", "mem_info_vram_total")
+                if os.path.exists(vram_file):
+                    with open(vram_file, "r") as f:
+                        vram_bytes = int(f.read().strip())
+                    idx = int(entry.replace("card", ""))
+                    vram_by_index[idx] = get_size(vram_bytes)
+    except Exception:
+        pass
+    return vram_by_index
+
 def get_gpu_info():
     gpus = []
     system = platform.system()
-    
+
+    # 1) GPUtil (NVIDIA, via nvidia-smi under the hood)
     if GPUtil:
         try:
-            gpus_found = GPUtil.getGPUs()
-            for gpu in gpus_found:
-                gpus.append(f"{gpu.name} ({get_size(gpu.memoryTotal * 1024 * 1024, 'B')} VRAM)")
+            for gpu in GPUtil.getGPUs():
+                vram = get_size(gpu.memoryTotal * 1024 * 1024, "B")
+                gpus.append(f"{gpu.name} ({vram} VRAM)")
         except Exception:
             pass
 
+    # 2) Call nvidia-smi directly. This covers systems where the driver/tool
+    #    is present but the optional GPUtil package isn't installed, or
+    #    GPUtil failed to parse its output - this was the actual cause of
+    #    VRAM being dropped previously.
+    if not gpus:
+        try:
+            output = subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=name,memory.total",
+                 "--format=csv,noheader,nounits"],
+                text=True, errors="ignore", stderr=subprocess.DEVNULL
+            )
+            for line in output.strip().split('\n'):
+                if not line.strip():
+                    continue
+                parts = [p.strip() for p in line.split(',')]
+                if len(parts) == 2:
+                    name, mem_mib = parts
+                    try:
+                        vram = get_size(float(mem_mib) * 1024 * 1024, "B")
+                        gpus.append(f"{name} ({vram} VRAM)")
+                    except ValueError:
+                        gpus.append(name)
+        except Exception:
+            pass
+
+    # 3) Windows fallback via WMI, including AdapterRAM for VRAM
     if not gpus and system == "Windows":
         try:
-            cmd = "powershell -Command \"Get-WmiObject Win32_VideoController | Select-Object Name | Format-List\""
+            cmd = ("powershell -Command \"Get-WmiObject Win32_VideoController | "
+                   "Select-Object Name, AdapterRAM | Format-List\"")
             output = subprocess.check_output(cmd, shell=True, text=True, errors="ignore")
+            name = ""
             for line in output.split('\n'):
                 if "Name" in line and ":" in line:
-                    gpu_name = line.split(":", 1)[1].strip()
-                    if gpu_name and gpu_name not in gpus:
-                        gpus.append(gpu_name)
+                    name = line.split(":", 1)[1].strip()
+                elif "AdapterRAM" in line and ":" in line:
+                    ram_str = line.split(":", 1)[1].strip()
+                    vram_suffix = ""
+                    try:
+                        ram_bytes = int(ram_str)
+                        if ram_bytes > 0:
+                            vram_suffix = f" ({get_size(ram_bytes)} VRAM)"
+                    except ValueError:
+                        pass
+                    if name:
+                        gpus.append(f"{name}{vram_suffix}")
+                    name = ""
         except Exception:
             pass
 
+    # 4) Linux fallback: lspci for the GPU name(s), sysfs for VRAM (AMD/nouveau)
     if not gpus and system == "Linux":
+        lspci_names = []
         try:
             output = subprocess.check_output("lspci | grep -i vga", shell=True, text=True, errors="ignore")
-            for line in output.split('\n'):
-                if line.strip():
-                    gpus.append(line.split(':')[-1].strip())
+            lspci_names = [line.split(':', 2)[-1].strip() for line in output.split('\n') if line.strip()]
         except Exception:
             pass
+
+        vram_by_index = _read_linux_sysfs_vram()
+
+        if lspci_names:
+            for i, name in enumerate(lspci_names):
+                vram = vram_by_index.get(i)
+                gpus.append(f"{name} ({vram} VRAM)" if vram else name)
+        elif vram_by_index:
+            for idx, vram in vram_by_index.items():
+                gpus.append(f"GPU {idx} ({vram} VRAM)")
 
     return ", ".join(gpus) if gpus else "Standard Display Adapter"
 
@@ -179,36 +249,78 @@ def generate_pdf(specs, disk_info, filename="Reportix_System_Report.pdf"):
     section_style = ParagraphStyle(
         'SectionStyle', parent=styles['Heading2'], fontSize=13, textColor=colors.HexColor("#2B6CB0"), spaceBefore=10, spaceAfter=6
     )
+    # Dedicated cell styles for the tables. Plain strings inside a Table
+    # never wrap - if a value (e.g. a long GPU string or a long snap
+    # mountpoint) is wider than its column, ReportLab just lets it overflow
+    # and paint over the neighboring columns, which is what produced the
+    # garbled/overlapping text in the report. Wrapping every cell in a
+    # Paragraph forces proper word-wrapping inside the column instead.
+    cell_style = ParagraphStyle(
+        'CellStyle', parent=styles['Normal'], fontSize=9, leading=11, wordWrap='CJK'
+    )
+    cell_style_bold = ParagraphStyle(
+        'CellStyleBold', parent=cell_style, fontName='Helvetica-Bold'
+    )
+    header_style = ParagraphStyle(
+        'HeaderStyle', parent=styles['Normal'], fontSize=9, leading=11,
+        textColor=colors.whitesmoke, fontName='Helvetica-Bold', alignment=1
+    )
+    disk_cell_style = ParagraphStyle(
+        'DiskCellStyle', parent=cell_style, fontSize=8, leading=10, wordWrap='CJK'
+    )
 
     story.append(Paragraph("Reportix - System Specifications & PDF Reporter", title_style))
     story.append(Paragraph(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
     story.append(Spacer(1, 10))
 
     story.append(Paragraph("Hardware & OS Overview", section_style))
-    spec_data = [[Paragraph(f"<b>{k}</b>", styles['Normal']), Paragraph(str(v), styles['Normal'])] for k, v in specs.items()]
-    t1 = Table(spec_data, colWidths=[180, 360])
+    spec_data = [
+        [Paragraph(k, cell_style_bold), Paragraph(str(v), cell_style)]
+        for k, v in specs.items()
+    ]
+    t1 = Table(spec_data, colWidths=[150, 390])
     t1.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F7FAFC")),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#E2E8F0")),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('PADDING', (0,0), (-1,-1), 5),
+        ('LEFTPADDING', (0,0), (-1,-1), 6),
+        ('RIGHTPADDING', (0,0), (-1,-1), 6),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
     ]))
     story.append(t1)
     story.append(Spacer(1, 10))
 
     story.append(Paragraph("Storage Partitions", section_style))
-    disk_table_data = [["Device", "Mount", "Total", "Used", "Free", "Use %"]]
+    disk_table_data = [
+        [Paragraph(h, header_style) for h in ["Device", "Mount", "Total", "Used", "Free", "Use %"]]
+    ]
     for d in disk_info:
-        disk_table_data.append([d["Device"], d["Mountpoint"], d["Total"], d["Used"], d["Free"], d["Percentage"]])
-    
-    t2 = Table(disk_table_data, colWidths=[100, 100, 80, 80, 80, 100])
+        disk_table_data.append([
+            Paragraph(d["Device"], disk_cell_style),
+            Paragraph(d["Mountpoint"], disk_cell_style),
+            Paragraph(d["Total"], disk_cell_style),
+            Paragraph(d["Used"], disk_cell_style),
+            Paragraph(d["Free"], disk_cell_style),
+            Paragraph(d["Percentage"], disk_cell_style),
+        ])
+
+    # Wider Device/Mount columns (these hold long paths like
+    # /var/lib/snapd/snap/...) and narrower numeric columns; total still
+    # sums to the 540pt usable width (letter width 612 - 36 - 36 margins).
+    t2 = Table(disk_table_data, colWidths=[120, 150, 70, 70, 70, 60], repeatRows=1)
     t2.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2B6CB0")),
         ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
-        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('ALIGN', (2,0), (-1,-1), 'CENTER'),
+        ('ALIGN', (0,0), (1,-1), 'LEFT'),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#E2E8F0")),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('PADDING', (0,0), (-1,-1), 5),
+        ('LEFTPADDING', (0,0), (-1,-1), 5),
+        ('RIGHTPADDING', (0,0), (-1,-1), 5),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor("#F7FAFC")]),
     ]))
     story.append(t2)
 
