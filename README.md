@@ -45,3 +45,13 @@ pyinstaller --onefile --noconsole --name "Reportix-v1.0.0-portable" app.py
 ```
 
 The compiled standalone executable will be created inside the `dist` folder.
+
+## License
+
+This project is under the MIT license. Read the [License](LICENSE.md) document for more details.
+
+## Contributors
+
+<a href="https://github.com/Abdulaziz-hu/Reportix/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Abdulaziz-hu/Reportix&size=20"/>
+</a>

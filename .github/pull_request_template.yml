@@ -1,0 +1,36 @@
+name: Pull Request
+description: Submit changes to the Reportix repository.
+title: "[PR]: "
+labels: ["pull-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for contributing to Reportix! Please fill out the details below to help review your code.
+  - type: textarea
+    id: related-issue
+    attributes:
+      label: Related Issue
+      description: Link any related issues or bug reports here (e.g. Fixes #12).
+      placeholder: "Fixes #"
+    validations:
+      required: false
+  - type: textarea
+    id: changes-description
+    attributes:
+      label: What kind of change does this PR introduce?
+      description: Clear and concise description of the new feature, fix, or optimization.
+      placeholder: e.g. Fixed text overlap in partitions section and updated PyQt6 layout.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Contribution Checklist
+      options:
+        - label: I have tested my changes locally with Python and PyQt6.
+          required: true
+        - label: I have updated requirements.txt if new dependencies were added.
+          required: false
+        - label: My code follows standard Python coding styles.
+          required: true
