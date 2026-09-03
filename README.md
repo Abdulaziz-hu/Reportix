@@ -4,6 +4,11 @@ An effortless way to generate a clean, detailed PDF report of your computer's ha
 
 > The app is only tested on Linux and Windows
 
+## Screenshots
+
+![Showcase 1](assets/showcase/showcase-1.png)
+![PDF Report](assets/showcase/report-showcase.png)
+
 **Prerequisites**
 Python 3.8 or higher installed on your system.
 
