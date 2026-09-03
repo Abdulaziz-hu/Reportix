@@ -41,7 +41,7 @@ pip install pyinstaller
 Run the build command from the project root directory:
 
 ```bash
-pyinstaller --onefile --noconsole --name "Reportix-v1.1.0-portable" app.py
+pyinstaller --onefile --noconsole --name "Reportix-v1.1.0-portable" main.py
 ```
 
 The compiled standalone executable will be created inside the `dist` folder.
