@@ -1,0 +1,41 @@
+name: Bug Report
+description: Create a report to help us fix a PyQt6 or system monitoring issue in Reportix.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report! Please provide details to help us reproduce the issue.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description of what the bug is.
+      placeholder: e.g. The PDF generation crashes when clicking export while CPU usage is high.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to reproduce
+      description: Steps to reproduce the behavior.
+      value: |
+        1. Run `python app.py`
+        2. Go to '...'
+        3. Click on '...'
+        4. See error
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: System Environment
+      description: Share details about your setup.
+      placeholder: |
+        - OS: [e.g. Windows 11, Ubuntu 24.04, CachyOS]
+        - Python version: [e.g. 3.11]
+        - PyQt6 version: 
+        - GPU/CPU: [e.g. Intel i5 / NVIDIA GTX 1650]
+    validations:
+      required: true
