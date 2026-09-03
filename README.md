@@ -1,3 +1,8 @@
+# Reportix
+An easier way to grab your computer specs in a PDF report.
+
+> The app is only tested on Linux and Windows
+
 **Prerequisites**
 Python 3.8 or higher installed on your system.
 
