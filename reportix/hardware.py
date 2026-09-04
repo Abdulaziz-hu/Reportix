@@ -342,6 +342,7 @@ def _parse_dmidecode_memory(output):
             "Slot": _clean(info.get("Locator"), "N/A"),
             "Manufacturer": _clean(info.get("Manufacturer")),
             "Part Number": _clean(info.get("Part Number")),
+            "Serial Number": _clean(info.get("Serial Number"), ""),
             "Capacity": size,
             "Speed": _clean(info.get("Speed")),
         })
@@ -376,6 +377,8 @@ def _parse_macos_memory(output):
                 current["Manufacturer"] = val
             elif key == "Part Number":
                 current["Part Number"] = val
+            elif key == "Serial Number":
+                current["Serial Number"] = val
     if current and current.get("Capacity"):
         modules.append(current)
 
@@ -384,7 +387,48 @@ def _parse_macos_memory(output):
         m.setdefault("Part Number", "Unknown")
         m.setdefault("Capacity", "Unknown")
         m.setdefault("Speed", "Unknown")
+        m.setdefault("Serial Number", "")
     return modules
+
+
+# --------------------------------------------------------------------------
+# RAM - de-duplication
+# --------------------------------------------------------------------------
+
+def _dedupe_ram_modules(modules):
+    """
+    Some systems report the same physical memory stick more than once - a
+    known quirk of Windows' Win32_PhysicalMemory (and occasionally
+    dmidecode on certain BIOS/firmware) where a single DIMM shows up as
+    two or more practically identical rows. That made Reportix report,
+    say, "2 sticks" on a machine that's physically got just 1.
+
+    Collapse rows that clearly refer to the same physical module down to
+    one. The Serial Number is the most reliable "this is physically the
+    same stick" signal, so it's preferred as the de-duplication key
+    whenever it's actually populated with a real value; otherwise we fall
+    back to the combination of fields the user can actually see (slot,
+    manufacturer, part number, capacity, speed) - if all of those match,
+    it's the same row being reported twice, not two different sticks.
+    """
+    placeholder_serials = {"", "unknown", "none", "n/a", "0", "0000000000", "serial number"}
+    seen = set()
+    deduped = []
+    for m in modules:
+        serial = _clean(m.get("Serial Number"), "").strip()
+        if serial and serial.lower() not in placeholder_serials:
+            key = ("serial", serial.lower())
+        else:
+            key = (
+                "fields",
+                m.get("Slot"), m.get("Manufacturer"),
+                m.get("Part Number"), m.get("Capacity"), m.get("Speed"),
+            )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(m)
+    return deduped
 
 
 def get_ram_modules():
@@ -400,8 +444,8 @@ def get_ram_modules():
         if system == "Windows":
             data = _run_powershell_json(
                 "Get-WmiObject Win32_PhysicalMemory | Select-Object "
-                "BankLabel, DeviceLocator, Manufacturer, PartNumber, Capacity, "
-                "Speed, ConfiguredClockSpeed"
+                "BankLabel, DeviceLocator, Manufacturer, PartNumber, SerialNumber, "
+                "Capacity, Speed, ConfiguredClockSpeed"
             )
             for item in _as_list(data):
                 try:
@@ -414,6 +458,7 @@ def get_ram_modules():
                     "Slot": _clean(slot, "N/A"),
                     "Manufacturer": _clean(item.get("Manufacturer")),
                     "Part Number": _clean(item.get("PartNumber")),
+                    "Serial Number": _clean(item.get("SerialNumber"), ""),
                     "Capacity": get_size(capacity_bytes) if capacity_bytes else "Unknown",
                     "Speed": f"{speed} MHz" if speed else "Unknown",
                 })
@@ -433,6 +478,13 @@ def get_ram_modules():
             modules = _parse_macos_memory(output)
     except Exception:
         modules = []
+
+    # Collapse any duplicate rows the OS/firmware reported for the same
+    # physical stick, then drop the internal-only Serial Number field
+    # before handing the list back to the UI / PDF report.
+    modules = _dedupe_ram_modules(modules)
+    for m in modules:
+        m.pop("Serial Number", None)
     return modules
 
 
@@ -486,6 +538,23 @@ def get_os_version_details():
             build = _reg("CurrentBuildNumber", platform.version().split(".")[-1])
             ubr = _reg("UBR")
             build_full = f"{build}.{ubr}" if ubr else build
+
+            # Known Microsoft quirk: Windows 11 still reports itself as
+            # "Windows 10 <Edition>" under the ProductName registry value -
+            # that string was never updated when Windows 11 shipped. Build
+            # 22000 is where Windows 11 starts, so once we're above that
+            # threshold we correct the name ourselves rather than trusting
+            # ProductName verbatim; the edition part of the string (Home,
+            # Pro, Enterprise, ...) is still accurate and is preserved as-is.
+            try:
+                build_num = int(build)
+            except (TypeError, ValueError):
+                build_num = 0
+
+            if build_num >= 22000 and "Windows 10" in product_name:
+                product_name = product_name.replace("Windows 10", "Windows 11")
+            elif build_num >= 22000 and "Windows 11" not in product_name:
+                product_name = f"Windows 11 {product_name}".strip()
 
             os_name = product_name
             if display_version:

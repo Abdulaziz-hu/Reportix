@@ -5,17 +5,22 @@ import webbrowser
 from datetime import datetime
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QAction
+from PyQt6.QtGui import QFont, QAction, QGuiApplication
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTextEdit, QLabel, QMessageBox, QDialog, QDialogButtonBox,
-    QFileDialog, QStatusBar,
+    QFileDialog, QStatusBar, QComboBox,
 )
 
-from .version import APP_NAME, APP_VERSION, GITHUB_REPO_URL, GITHUB_RELEASES_URL
+from .version import (
+    APP_NAME, APP_VERSION, GITHUB_REPO_URL, GITHUB_RELEASES_URL,
+    GITHUB_ISSUES_URL, GITHUB_ISSUES_NEW_URL,
+)
 from .hardware import gather_system_specs
 from .pdf_report import generate_pdf
 from .updater import UpdateCheckWorker
+from .settings import AppSettings
+from .i18n import translate, LANGUAGES, DEFAULT_LANGUAGE, is_rtl
 
 
 # --------------------------------------------------------------------------
@@ -54,14 +59,275 @@ class PdfWorker(QThread):
 
 
 # --------------------------------------------------------------------------
+# Theming
+# --------------------------------------------------------------------------
+
+def resolve_theme(theme):
+    """
+    "light"/"dark" pass straight through. "system" is resolved against the
+    OS-reported color scheme (Qt 6.5+); if that API isn't available (older
+    Qt) or reports "unknown", we fall back to dark, matching the app's
+    original look.
+    """
+    if theme != "system":
+        return theme
+    try:
+        scheme = QGuiApplication.styleHints().colorScheme()
+        if scheme.name.lower() == "light":
+            return "light"
+        if scheme.name.lower() == "dark":
+            return "dark"
+    except Exception:
+        pass
+    return "dark"
+
+
+_DARK_STYLESHEET = """
+    QMainWindow, QDialog {
+        background-color: #0F172A;
+    }
+    QWidget {
+        background-color: transparent;
+        font-family: 'Segoe UI', sans-serif;
+    }
+    QWidget#centralWidget {
+        background-color: #0F172A;
+    }
+    QLabel {
+        color: #F8FAFC;
+        font-family: 'Segoe UI', sans-serif;
+    }
+    QPushButton {
+        background-color: #2563EB;
+        color: #FFFFFF;
+        border-radius: 6px;
+        padding: 6px 16px;
+        font-family: 'Segoe UI', sans-serif;
+        font-weight: bold;
+        font-size: 10pt;
+        border: none;
+    }
+    QPushButton:hover {
+        background-color: #1D4ED8;
+    }
+    QPushButton:disabled {
+        background-color: #334155;
+        color: #64748B;
+    }
+    QComboBox {
+        background-color: #1E293B;
+        color: #E2E8F0;
+        border: 1px solid #334155;
+        border-radius: 6px;
+        padding: 4px 8px;
+    }
+    QComboBox QAbstractItemView {
+        background-color: #1E293B;
+        color: #E2E8F0;
+        selection-background-color: #2563EB;
+    }
+    QTextEdit {
+        background-color: #1E293B;
+        color: #E2E8F0;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        padding: 8px;
+        selection-background-color: #3B82F6;
+    }
+    QMenuBar {
+        background-color: #0F172A;
+        color: #E2E8F0;
+    }
+    QMenuBar::item:selected {
+        background-color: #1E293B;
+    }
+    QMenu {
+        background-color: #1E293B;
+        color: #E2E8F0;
+        border: 1px solid #334155;
+    }
+    QMenu::item:selected {
+        background-color: #2563EB;
+    }
+    QStatusBar {
+        background-color: #0F172A;
+        color: #64748B;
+    }
+    QDialog {
+        background-color: #0F172A;
+    }
+"""
+
+_LIGHT_STYLESHEET = """
+    QMainWindow, QDialog {
+        background-color: #F8FAFC;
+    }
+    QWidget {
+        background-color: transparent;
+        font-family: 'Segoe UI', sans-serif;
+    }
+    QWidget#centralWidget {
+        background-color: #F8FAFC;
+    }
+    QLabel {
+        color: #0F172A;
+        font-family: 'Segoe UI', sans-serif;
+    }
+    QPushButton {
+        background-color: #2563EB;
+        color: #FFFFFF;
+        border-radius: 6px;
+        padding: 6px 16px;
+        font-family: 'Segoe UI', sans-serif;
+        font-weight: bold;
+        font-size: 10pt;
+        border: none;
+    }
+    QPushButton:hover {
+        background-color: #1D4ED8;
+    }
+    QPushButton:disabled {
+        background-color: #CBD5E1;
+        color: #94A3B8;
+    }
+    QComboBox {
+        background-color: #FFFFFF;
+        color: #0F172A;
+        border: 1px solid #CBD5E1;
+        border-radius: 6px;
+        padding: 4px 8px;
+    }
+    QComboBox QAbstractItemView {
+        background-color: #FFFFFF;
+        color: #0F172A;
+        selection-background-color: #2563EB;
+        selection-color: #FFFFFF;
+    }
+    QTextEdit {
+        background-color: #FFFFFF;
+        color: #1E293B;
+        border: 1px solid #CBD5E1;
+        border-radius: 8px;
+        padding: 8px;
+        selection-background-color: #93C5FD;
+    }
+    QMenuBar {
+        background-color: #F8FAFC;
+        color: #0F172A;
+    }
+    QMenuBar::item:selected {
+        background-color: #E2E8F0;
+    }
+    QMenu {
+        background-color: #FFFFFF;
+        color: #0F172A;
+        border: 1px solid #CBD5E1;
+    }
+    QMenu::item:selected {
+        background-color: #2563EB;
+        color: #FFFFFF;
+    }
+    QStatusBar {
+        background-color: #F8FAFC;
+        color: #64748B;
+    }
+    QDialog {
+        background-color: #F8FAFC;
+    }
+"""
+
+
+def apply_stylesheet(app, theme="dark"):
+    """`theme` should already be resolved ("light" or "dark") - see
+    resolve_theme() for turning the user's "system" preference into one
+    of those two."""
+    app.setStyleSheet(_LIGHT_STYLESHEET if theme == "light" else _DARK_STYLESHEET)
+
+
+# --------------------------------------------------------------------------
+# Preferences dialog - theme + language, with an honest note about the
+# AI-generated translations.
+# --------------------------------------------------------------------------
+
+class PreferencesDialog(QDialog):
+    def __init__(self, settings, lang, parent=None):
+        super().__init__(parent)
+        self.settings = settings
+
+        self._theme_keys = ["system", "light", "dark"]
+        self._lang_codes = list(LANGUAGES.keys())
+
+        self.result_theme = settings.theme
+        self.result_language = settings.language
+
+        self.setWindowTitle(translate("prefs_title", lang))
+        self.setMinimumWidth(440)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+
+        theme_row = QHBoxLayout()
+        theme_label = QLabel(translate("prefs_theme_label", lang))
+        theme_row.addWidget(theme_label)
+        self.theme_combo = QComboBox()
+        for key in self._theme_keys:
+            self.theme_combo.addItem(translate(f"prefs_theme_{key}", lang))
+        current_theme = settings.theme if settings.theme in self._theme_keys else "dark"
+        self.theme_combo.setCurrentIndex(self._theme_keys.index(current_theme))
+        theme_row.addWidget(self.theme_combo, 1)
+        layout.addLayout(theme_row)
+
+        lang_row = QHBoxLayout()
+        lang_label = QLabel(translate("prefs_language_label", lang))
+        lang_row.addWidget(lang_label)
+        self.lang_combo = QComboBox()
+        for code in self._lang_codes:
+            self.lang_combo.addItem(LANGUAGES[code])
+        current_lang = lang if lang in self._lang_codes else DEFAULT_LANGUAGE
+        self.lang_combo.setCurrentIndex(self._lang_codes.index(current_lang))
+        lang_row.addWidget(self.lang_combo, 1)
+        layout.addLayout(lang_row)
+
+        notice = QLabel(translate("prefs_ai_notice", lang))
+        notice.setWordWrap(True)
+        notice.setStyleSheet("color: #94A3B8; font-size: 9pt; margin-top: 4px;")
+        layout.addWidget(notice)
+
+        issue_link = QLabel(
+            f'<a href="{GITHUB_ISSUES_NEW_URL}">{translate("prefs_report_issue_link", lang)}</a>'
+        )
+        issue_link.setOpenExternalLinks(True)
+        issue_link.setStyleSheet("font-size: 9pt;")
+        layout.addWidget(issue_link)
+
+        restart_note = QLabel(translate("prefs_restart_note", lang))
+        restart_note.setWordWrap(True)
+        restart_note.setStyleSheet("color: #64748B; font-size: 8.5pt; margin-top: 6px;")
+        layout.addWidget(restart_note)
+
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.accepted.connect(self._on_accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def _on_accept(self):
+        self.result_theme = self._theme_keys[self.theme_combo.currentIndex()]
+        self.result_language = self._lang_codes[self.lang_combo.currentIndex()]
+        self.accept()
+
+
+# --------------------------------------------------------------------------
 # Update dialog - shows formatted release notes, "Update" opens the browser
 # --------------------------------------------------------------------------
 
 class UpdateDialog(QDialog):
-    def __init__(self, release_info, parent=None):
+    def __init__(self, release_info, lang=DEFAULT_LANGUAGE, parent=None):
         super().__init__(parent)
         self.release_info = release_info
-        self.setWindowTitle("Update Available - Reportix")
+        self.setWindowTitle(translate("update_dialog_title", lang))
         self.resize(520, 420)
         self.setMinimumSize(420, 320)
 
@@ -70,16 +336,16 @@ class UpdateDialog(QDialog):
         layout.setSpacing(10)
 
         tag = release_info.get("tag_name", "")
-        headline = QLabel(f"A new version of Reportix is available: {tag}")
+        headline = QLabel(translate("update_headline", lang, tag=tag))
         headline.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
         headline.setWordWrap(True)
         layout.addWidget(headline)
 
-        current_label = QLabel(f"You're currently running v{APP_VERSION}.")
+        current_label = QLabel(translate("update_current_running", lang, version=APP_VERSION))
         current_label.setStyleSheet("color: #94A3B8;")
         layout.addWidget(current_label)
 
-        notes_label = QLabel("Release notes:")
+        notes_label = QLabel(translate("update_release_notes", lang))
         notes_label.setStyleSheet("color: #E2E8F0; font-weight: bold; margin-top: 6px;")
         layout.addWidget(notes_label)
 
@@ -88,12 +354,18 @@ class UpdateDialog(QDialog):
         # setMarkdown renders the GitHub-flavoured markdown release body
         # (headings, lists, bold, code, links, ...) instead of dumping raw
         # markdown syntax at the user.
-        self.notes_view.setMarkdown(release_info.get("body", "") or "_No release notes were provided._")
+        self.notes_view.setMarkdown(
+            release_info.get("body", "") or f'_{translate("update_no_notes", lang)}_'
+        )
         layout.addWidget(self.notes_view, stretch=1)
 
         button_box = QDialogButtonBox()
-        self.later_btn = button_box.addButton("Later", QDialogButtonBox.ButtonRole.RejectRole)
-        self.update_btn = button_box.addButton("Update Now", QDialogButtonBox.ButtonRole.AcceptRole)
+        self.later_btn = button_box.addButton(
+            translate("btn_later", lang), QDialogButtonBox.ButtonRole.RejectRole
+        )
+        self.update_btn = button_box.addButton(
+            translate("btn_update_now", lang), QDialogButtonBox.ButtonRole.AcceptRole
+        )
         self.update_btn.setDefault(True)
         self.later_btn.clicked.connect(self.reject)
         self.update_btn.clicked.connect(self.on_update_clicked)
@@ -112,9 +384,9 @@ class UpdateDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"{APP_NAME} v{APP_VERSION} - System Specifications & PDF Reporter")
-        self.resize(800, 580)
-        self.setMinimumSize(620, 460)
+
+        self.settings = AppSettings()
+        self.lang = self.settings.language if self.settings.language in LANGUAGES else DEFAULT_LANGUAGE
 
         self.specs_data = None
         self.disk_data = None
@@ -126,44 +398,61 @@ class MainWindow(QMainWindow):
         self.update_worker = None
         self._manual_update_check = False
 
+        self.resize(800, 580)
+        self.setMinimumSize(620, 460)
+
         self.init_ui()
         self.init_menu()
+        self.retranslate_ui()
+
+        if not self.settings.restore_geometry(self):
+            self.resize(800, 580)
 
         # Check for updates shortly after the window appears, every time
         # the app is opened, without blocking startup or nagging when the
         # network is unavailable.
         QTimer.singleShot(600, lambda: self.check_for_updates(silent=True))
 
+    # -- Translation helper --------------------------------------------------
+
+    def t(self, key, **kwargs):
+        return translate(key, self.lang, **kwargs)
+
     # -- UI construction ---------------------------------------------------
 
     def init_ui(self):
         central_widget = QWidget()
+        # Named so the "QWidget#centralWidget" rule in the stylesheet can
+        # give it (and therefore the whole window's visible client area) an
+        # explicit, opaque background instead of "transparent" - see the
+        # comment above _DARK_STYLESHEET / _LIGHT_STYLESHEET for why that
+        # matters.
+        central_widget.setObjectName("centralWidget")
         self.setCentralWidget(central_widget)
 
         layout = QVBoxLayout(central_widget)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        title_label = QLabel(f"{APP_NAME} - System Specifications & PDF Reporter")
-        title_label.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
-        title_label.setStyleSheet("color: #E2E8F0;")
-        layout.addWidget(title_label)
+        self.title_label = QLabel()
+        self.title_label.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        layout.addWidget(self.title_label)
 
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
 
-        self.btn_scan = QPushButton("Grab Specs")
+        self.btn_scan = QPushButton()
         self.btn_scan.setMinimumHeight(38)
         self.btn_scan.clicked.connect(self.start_scan)
         btn_layout.addWidget(self.btn_scan)
 
-        self.btn_pdf = QPushButton("Generate PDF Report")
+        self.btn_pdf = QPushButton()
         self.btn_pdf.setMinimumHeight(38)
         self.btn_pdf.setEnabled(False)
         self.btn_pdf.clicked.connect(self.start_pdf_generation)
         btn_layout.addWidget(self.btn_pdf)
 
-        self.btn_copy = QPushButton("Copy Report")
+        self.btn_copy = QPushButton()
         self.btn_copy.setMinimumHeight(38)
         self.btn_copy.setEnabled(False)
         self.btn_copy.clicked.connect(self.copy_report)
@@ -176,48 +465,112 @@ class MainWindow(QMainWindow):
         self.text_output.setFont(QFont("JetBrains Mono", 10))
         layout.addWidget(self.text_output)
 
-        status = QStatusBar()
-        status.showMessage(f"{APP_NAME} v{APP_VERSION}")
-        self.setStatusBar(status)
-
-        self.log("Click 'Grab Specs' to begin hardware scan.")
+        self.status = QStatusBar()
+        self.setStatusBar(self.status)
 
     def init_menu(self):
         menu_bar = self.menuBar()
 
-        file_menu = menu_bar.addMenu("&File")
-        export_action = QAction("Export PDF Report...", self)
-        export_action.setEnabled(False)
-        export_action.triggered.connect(self.start_pdf_generation)
-        self.export_action = export_action
-        file_menu.addAction(export_action)
-        file_menu.addSeparator()
-        exit_action = QAction("Exit", self)
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
+        self.file_menu = menu_bar.addMenu("")
+        self.export_action = QAction(self)
+        self.export_action.setEnabled(False)
+        self.export_action.triggered.connect(self.start_pdf_generation)
+        self.file_menu.addAction(self.export_action)
+        self.file_menu.addSeparator()
+        self.exit_action = QAction(self)
+        self.exit_action.triggered.connect(self.close)
+        self.file_menu.addAction(self.exit_action)
 
-        help_menu = menu_bar.addMenu("&Help")
-        check_update_action = QAction("Check for Updates...", self)
-        check_update_action.triggered.connect(lambda: self.check_for_updates(silent=False))
-        help_menu.addAction(check_update_action)
+        # Edit menu - houses Preferences (theme + language), as requested.
+        self.edit_menu = menu_bar.addMenu("")
+        self.preferences_action = QAction(self)
+        self.preferences_action.setShortcut("Ctrl+,")
+        self.preferences_action.triggered.connect(self.open_preferences)
+        self.edit_menu.addAction(self.preferences_action)
 
-        repo_action = QAction("View on GitHub", self)
-        repo_action.triggered.connect(lambda: webbrowser.open(GITHUB_REPO_URL))
-        help_menu.addAction(repo_action)
+        self.help_menu = menu_bar.addMenu("")
+        self.check_update_action = QAction(self)
+        self.check_update_action.triggered.connect(lambda: self.check_for_updates(silent=False))
+        self.help_menu.addAction(self.check_update_action)
 
-        help_menu.addSeparator()
-        about_action = QAction("About Reportix", self)
-        about_action.triggered.connect(self.show_about)
-        help_menu.addAction(about_action)
+        self.repo_action = QAction(self)
+        self.repo_action.triggered.connect(lambda: webbrowser.open(GITHUB_REPO_URL))
+        self.help_menu.addAction(self.repo_action)
+
+        self.report_issue_action = QAction(self)
+        self.report_issue_action.triggered.connect(lambda: webbrowser.open(GITHUB_ISSUES_URL))
+        self.help_menu.addAction(self.report_issue_action)
+
+        self.help_menu.addSeparator()
+        self.about_action = QAction(self)
+        self.about_action.triggered.connect(self.show_about)
+        self.help_menu.addAction(self.about_action)
+
+    # -- Translation application --------------------------------------------
+
+    def retranslate_ui(self):
+        self.setWindowTitle(self.t("window_title", app=APP_NAME, version=APP_VERSION))
+        self.title_label.setText(self.t("title_label", app=APP_NAME))
+
+        self.btn_scan.setText(self.t("btn_grab_specs"))
+        self.btn_pdf.setText(self.t("btn_generate_pdf"))
+        self.btn_copy.setText(self.t("btn_copy_report"))
+
+        self.file_menu.setTitle(self.t("menu_file"))
+        self.export_action.setText(self.t("action_export_pdf"))
+        self.exit_action.setText(self.t("action_exit"))
+
+        self.edit_menu.setTitle(self.t("menu_edit"))
+        self.preferences_action.setText(self.t("action_preferences"))
+
+        self.help_menu.setTitle(self.t("menu_help"))
+        self.check_update_action.setText(self.t("action_check_updates"))
+        self.repo_action.setText(self.t("action_view_github"))
+        self.report_issue_action.setText(self.t("action_report_issue"))
+        self.about_action.setText(self.t("action_about"))
+
+        self.status.showMessage(self.t("status_ready", app=APP_NAME, version=APP_VERSION))
+
+        if self.text_output.toPlainText().strip() == "" and self.specs_data is None:
+            self.log(self.t("log_click_to_begin"))
 
     def log(self, message):
         self.text_output.append(message)
+
+    # -- Preferences ---------------------------------------------------------
+
+    def open_preferences(self):
+        dialog = PreferencesDialog(self.settings, self.lang, parent=self)
+        if not dialog.exec():
+            return
+
+        theme_changed = dialog.result_theme != self.settings.theme
+        lang_changed = dialog.result_language != self.settings.language
+
+        self.settings.theme = dialog.result_theme
+        self.settings.language = dialog.result_language
+        self.settings.sync()
+
+        if theme_changed:
+            app = QApplication.instance()
+            if app is not None:
+                apply_stylesheet(app, resolve_theme(self.settings.theme))
+
+        if lang_changed:
+            self.lang = self.settings.language
+            app = QApplication.instance()
+            if app is not None:
+                app.setLayoutDirection(
+                    Qt.LayoutDirection.RightToLeft if is_rtl(self.lang)
+                    else Qt.LayoutDirection.LeftToRight
+                )
+            self.retranslate_ui()
 
     # -- Scan ---------------------------------------------------------------
 
     def start_scan(self):
         self.text_output.clear()
-        self.log("Scanning hardware topology (CPU, Motherboard, BIOS, GPU, RAM, Disks)...")
+        self.log(self.t("log_scanning"))
         self.btn_scan.setEnabled(False)
         self.btn_pdf.setEnabled(False)
         self.btn_copy.setEnabled(False)
@@ -237,11 +590,11 @@ class MainWindow(QMainWindow):
         self.btn_copy.setEnabled(True)
         self.export_action.setEnabled(True)
 
-        self.log("=== SYSTEM HARDWARE OVERVIEW ===")
+        self.log(self.t("log_hw_overview_header"))
         for k, v in specs.items():
             self.log(f"• <b>{k}:</b> {v}")
 
-        self.log("\n=== MEMORY (RAM) MODULES ===")
+        self.log("\n" + self.t("log_ram_header"))
         if ram_modules:
             for m in ram_modules:
                 self.log(
@@ -250,26 +603,23 @@ class MainWindow(QMainWindow):
                     f"— {m.get('Capacity', 'Unknown')} @ {m.get('Speed', 'Unknown')}"
                 )
         else:
-            self.log(
-                "• Per-module details unavailable on this system "
-                "(on Linux this usually needs 'sudo' since it relies on dmidecode)."
-            )
+            self.log(f"• {self.t('log_ram_unavailable')}")
 
-        self.log("\n=== STORAGE PARTITIONS ===")
+        self.log("\n" + self.t("log_storage_header"))
         for d in disks:
             self.log(f"• <b>{d['Device']}</b> ({d['Mountpoint']}) — Total: {d['Total']}, Free: {d['Free']} ({d['Percentage']} used)")
 
-        self.log("\nReady to compile report.")
+        self.log("\n" + self.t("log_ready_to_compile"))
 
     def on_scan_error(self, err_msg):
         self.btn_scan.setEnabled(True)
-        QMessageBox.critical(self, "Error", f"Failed to gather specs:\n{err_msg}")
+        QMessageBox.critical(self, self.t("msg_error_title"), self.t("msg_scan_failed", err=err_msg))
 
     # -- Copy to clipboard ----------------------------------------------------
 
     def copy_report(self):
         QApplication.clipboard().setText(self.text_output.toPlainText())
-        self.statusBar().showMessage("Report copied to clipboard.", 4000)
+        self.statusBar().showMessage(self.t("status_report_copied"), 4000)
 
     # -- PDF ------------------------------------------------------------------
 
@@ -279,14 +629,14 @@ class MainWindow(QMainWindow):
 
         default_name = f"Reportix_System_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
         filepath, _ = QFileDialog.getSaveFileName(
-            self, "Save PDF Report", default_name, "PDF Files (*.pdf)"
+            self, self.t("dlg_save_pdf_title"), default_name, self.t("pdf_filter")
         )
         if not filepath:
             return
 
         self.btn_pdf.setEnabled(False)
         self.export_action.setEnabled(False)
-        self.log("\nCompiling PDF document...")
+        self.log("\n" + self.t("log_compiling_pdf"))
 
         self.pdf_worker = PdfWorker(self.specs_data, self.disk_data, self.ram_modules, filepath)
         self.pdf_worker.finished.connect(self.on_pdf_finished)
@@ -297,13 +647,13 @@ class MainWindow(QMainWindow):
         self.pdf_path = path
         self.btn_pdf.setEnabled(True)
         self.export_action.setEnabled(True)
-        self.log(f"PDF successfully compiled and saved to: {path}")
+        self.log(self.t("log_pdf_saved", path=path))
         self.open_pdf_file()
 
     def on_pdf_error(self, err_msg):
         self.btn_pdf.setEnabled(True)
         self.export_action.setEnabled(True)
-        QMessageBox.critical(self, "Error", f"PDF compilation failed:\n{err_msg}")
+        QMessageBox.critical(self, self.t("msg_error_title"), self.t("msg_pdf_failed", err=err_msg))
 
     def open_pdf_file(self):
         if not self.pdf_path or not os.path.exists(self.pdf_path):
@@ -317,7 +667,7 @@ class MainWindow(QMainWindow):
             else:
                 subprocess.run(["xdg-open", self.pdf_path])
         except Exception as e:
-            QMessageBox.warning(self, "Warning", f"Could not open file automatically: {e}")
+            QMessageBox.warning(self, self.t("msg_warning_title"), self.t("msg_could_not_open", err=e))
 
     # -- Update checker ---------------------------------------------------------
 
@@ -333,14 +683,14 @@ class MainWindow(QMainWindow):
         self.update_worker.start()
 
     def on_update_available(self, release_info):
-        dialog = UpdateDialog(release_info, parent=self)
+        dialog = UpdateDialog(release_info, lang=self.lang, parent=self)
         dialog.exec()
 
     def on_no_update(self):
         if self._manual_update_check:
             QMessageBox.information(
-                self, "No Updates Available",
-                f"You're already running the latest version (v{APP_VERSION})."
+                self, self.t("no_updates_title"),
+                self.t("no_updates_body", version=APP_VERSION),
             )
 
     def on_update_error(self, err_msg):
@@ -348,78 +698,21 @@ class MainWindow(QMainWindow):
         # internet connection - only surface errors from a manual check.
         if self._manual_update_check:
             QMessageBox.warning(
-                self, "Update Check Failed",
-                f"Couldn't check for updates:\n{err_msg}"
+                self, self.t("update_check_failed_title"),
+                self.t("update_check_failed_body", err=err_msg),
             )
 
     # -- About ------------------------------------------------------------------
 
     def show_about(self):
         QMessageBox.about(
-            self, "About Reportix",
-            f"<h3>{APP_NAME}</h3>"
-            f"<p>Version {APP_VERSION}</p>"
-            f"<p>An effortless way to generate a clean, detailed PDF report of "
-            f"your computer's hardware and system specifications.</p>"
-            f'<p><a href="{GITHUB_REPO_URL}">{GITHUB_REPO_URL}</a></p>'
+            self, self.t("about_title"),
+            self.t("about_body", app=APP_NAME, version=APP_VERSION, url=GITHUB_REPO_URL),
         )
 
+    # -- Window lifecycle ---------------------------------------------------
 
-def apply_stylesheet(app):
-    stylesheet = """
-        QMainWindow {
-            background-color: #0F172A;
-        }
-        QLabel {
-            color: #F8FAFC;
-            font-family: 'Segoe UI', sans-serif;
-        }
-        QPushButton {
-            background-color: #2563EB;
-            color: #FFFFFF;
-            border-radius: 6px;
-            padding: 6px 16px;
-            font-family: 'Segoe UI', sans-serif;
-            font-weight: bold;
-            font-size: 10pt;
-            border: none;
-        }
-        QPushButton:hover {
-            background-color: #1D4ED8;
-        }
-        QPushButton:disabled {
-            background-color: #334155;
-            color: #64748B;
-        }
-        QTextEdit {
-            background-color: #1E293B;
-            color: #E2E8F0;
-            border: 1px solid #334155;
-            border-radius: 8px;
-            padding: 8px;
-            selection-background-color: #3B82F6;
-        }
-        QMenuBar {
-            background-color: #0F172A;
-            color: #E2E8F0;
-        }
-        QMenuBar::item:selected {
-            background-color: #1E293B;
-        }
-        QMenu {
-            background-color: #1E293B;
-            color: #E2E8F0;
-            border: 1px solid #334155;
-        }
-        QMenu::item:selected {
-            background-color: #2563EB;
-        }
-        QStatusBar {
-            background-color: #0F172A;
-            color: #64748B;
-        }
-        QDialog {
-            background-color: #0F172A;
-        }
-    """
-    app.setStyleSheet(stylesheet)
+    def closeEvent(self, event):
+        self.settings.save_geometry(self)
+        self.settings.sync()
+        super().closeEvent(event)
