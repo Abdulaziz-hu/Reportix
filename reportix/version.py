@@ -6,7 +6,7 @@ The update checker compares this value against the latest GitHub release tag.
 """
 
 APP_NAME = "Reportix"
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 
 GITHUB_OWNER = "Abdulaziz-hu"
 GITHUB_REPO_NAME = "Reportix"
@@ -18,3 +18,5 @@ GITHUB_ISSUES_NEW_URL = f"{GITHUB_REPO_URL}/issues/new/choose"
 GITHUB_API_LATEST_RELEASE = (
     f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO_NAME}/releases/latest"
 )
+
+DOWNLOAD_PAGE_URL = "https://reportix.abdulazizhu.com/download.html"

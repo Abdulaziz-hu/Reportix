@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
 
 from .version import (
     APP_NAME, APP_VERSION, GITHUB_REPO_URL, GITHUB_RELEASES_URL,
-    GITHUB_ISSUES_URL, GITHUB_ISSUES_NEW_URL,
+    GITHUB_ISSUES_URL, GITHUB_ISSUES_NEW_URL, DOWNLOAD_PAGE_URL,
 )
 from .hardware import gather_system_specs
 from .pdf_report import generate_pdf
@@ -363,18 +363,35 @@ class UpdateDialog(QDialog):
         self.later_btn = button_box.addButton(
             translate("btn_later", lang), QDialogButtonBox.ButtonRole.RejectRole
         )
+        # Secondary path for anyone who specifically wants the raw GitHub
+        # release (assets, source tarball, changelog on GitHub itself)
+        # instead of the download page. Doesn't close the dialog, since
+        # someone might open that page for reference and still want to
+        # click "Update Now" afterwards.
+        self.github_btn = button_box.addButton(
+            translate("btn_view_on_github", lang), QDialogButtonBox.ButtonRole.ActionRole
+        )
         self.update_btn = button_box.addButton(
             translate("btn_update_now", lang), QDialogButtonBox.ButtonRole.AcceptRole
         )
         self.update_btn.setDefault(True)
         self.later_btn.clicked.connect(self.reject)
+        self.github_btn.clicked.connect(self.on_view_on_github_clicked)
         self.update_btn.clicked.connect(self.on_update_clicked)
         layout.addWidget(button_box)
 
     def on_update_clicked(self):
+        # Send people to the download page - it's the friendlier, easier
+        # place for most users to grab the new build from. The release
+        # notes above are still pulled live from GitHub either way.
+        webbrowser.open(DOWNLOAD_PAGE_URL)
+        self.accept()
+
+    def on_view_on_github_clicked(self):
+        # For anyone who specifically wants the GitHub release itself
+        # (assets, source tarball, ...) rather than the download page.
         url = self.release_info.get("html_url") or GITHUB_RELEASES_URL
         webbrowser.open(url)
-        self.accept()
 
 
 # --------------------------------------------------------------------------
