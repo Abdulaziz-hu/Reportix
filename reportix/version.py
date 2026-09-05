@@ -6,7 +6,7 @@ The update checker compares this value against the latest GitHub release tag.
 """
 
 APP_NAME = "Reportix"
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 
 GITHUB_OWNER = "Abdulaziz-hu"
 GITHUB_REPO_NAME = "Reportix"
