@@ -4,13 +4,6 @@ An effortless way to generate a clean, detailed PDF report of your computer's ha
 
 > The app is only tested on Linux and Windows
 
-## What's new in 1.2.0
-
-- **Fixed RAM module count.** Some systems (mostly via a known WMI/dmidecode quirk) reported the same physical stick twice. Reportix now de-duplicates modules so the count matches what's actually installed.
-- **Edit → Preferences.** Choose a Theme (System / Light / Dark) and a Language. Preferences are saved and applied immediately, no restart needed.
-- **Languages:** English, العربية, 日本語, Deutsch, Русский, Español, Français, 中文（简体）, Português, Türkçe, 한국어, हिन्दी. All non-English UI text was translated using AI and may not be fully accurate — if you spot an error, please [open an issue](https://github.com/Abdulaziz-hu/Reportix/issues/new) or send a fix.
-- The app now remembers its window size/position between launches.
-
 ## Screenshots
 
 | App Interface  | PDF Report |
@@ -48,7 +41,7 @@ pip install pyinstaller
 Run the build command from the project root directory:
 
 ```bash
-pyinstaller --onefile --noconsole --name "Reportix-v1.2.2-portable" main.py
+pyinstaller --onefile --noconsole --name "Reportix-v1.2.3-portable" main.py
 ```
 
 The compiled standalone executable will be created inside the `dist` folder.
