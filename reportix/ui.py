@@ -8,7 +8,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QAction, QGuiApplication
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QTextEdit, QLabel, QMessageBox, QDialog, QDialogButtonBox,
+    QPushButton, QTextEdit, QTextBrowser, QLabel, QMessageBox, QDialog, QDialogButtonBox,
     QFileDialog, QStatusBar, QComboBox,
 )
 
@@ -18,7 +18,7 @@ from .version import (
 )
 from .hardware import gather_system_specs
 from .pdf_report import generate_pdf
-from .updater import UpdateCheckWorker
+from .updater import UpdateCheckWorker, format_release_datetime
 from .settings import AppSettings
 from .i18n import translate, LANGUAGES, DEFAULT_LANGUAGE, is_rtl
 
@@ -349,12 +349,20 @@ class UpdateDialog(QDialog):
         current_label.setStyleSheet("color: #94A3B8;")
         layout.addWidget(current_label)
 
+        released_at = format_release_datetime(release_info.get("published_at"))
+        if released_at:
+            released_label = QLabel(translate("update_released_on", lang, date=released_at))
+            released_label.setStyleSheet("color: #94A3B8;")
+            layout.addWidget(released_label)
+
         notes_label = QLabel(translate("update_release_notes", lang))
         notes_label.setStyleSheet("color: #E2E8F0; font-weight: bold; margin-top: 6px;")
         layout.addWidget(notes_label)
 
-        self.notes_view = QTextEdit()
-        self.notes_view.setReadOnly(True)
+        # QTextBrowser (rather than QTextEdit) so links in the release
+        # body are clickable and open in the system browser.
+        self.notes_view = QTextBrowser()
+        self.notes_view.setOpenExternalLinks(True)
         # setMarkdown renders the GitHub-flavoured markdown release body
         # (headings, lists, bold, code, links, ...) instead of dumping raw
         # markdown syntax at the user.

@@ -9,6 +9,7 @@ Help menu.
 import json
 import urllib.request
 import urllib.error
+from datetime import datetime
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -39,6 +40,21 @@ def _parse_version(v):
 
 def is_newer(remote_version, local_version=APP_VERSION):
     return _parse_version(remote_version) > _parse_version(local_version)
+
+
+def format_release_datetime(published_at):
+    """GitHub's 'published_at' (e.g. '2024-01-15T10:30:00Z') -> a
+    localized 'YYYY-MM-DD HH:MM' string in the user's local timezone,
+    or None if it's missing/unparseable."""
+    if not published_at:
+        return None
+    try:
+        dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+        dt = dt.astimezone()
+    except (ValueError, TypeError):
+        return None
+    tz_label = dt.strftime("%Z") or "local time"
+    return f"{dt.strftime('%Y-%m-%d %H:%M')} {tz_label}".strip()
 
 
 class UpdateCheckWorker(QThread):
